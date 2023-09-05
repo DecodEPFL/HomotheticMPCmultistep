@@ -1,0 +1,5 @@
+function block_diag = blockDiagonal(A, n)
+    [m, ~] = size(A);
+    block = repmat(A, n, 1);
+    block_diag = reshape(block', m*n, []);
+end
