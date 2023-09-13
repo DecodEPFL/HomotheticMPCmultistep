@@ -42,12 +42,27 @@ Tsim = 10;
 x0 = [1;4;2];
 [x_traj,u_traj, y_traj,lambda,alpha,flag]= simulation(MPC,x0,constants,Tsim);%simulate
 %%
+[A,B,C,D]=getABCD(constants.theta,constants);
+x = x0;
+xxol =[];
+for i=1:Tsim                                     % Ntot is the number of samples
+    x1 = A*x + B*zeros(constants.nu*constants.pbar,1);
+    y =C*x + D*zeros(constants.nu*constants.pbar,1);
+    %store the values
+    xxol=[xxol;x;y];
+    %update the state
+    x=x1;
+end
 XX = [];
 for i = 1:Tsim
     XX =[XX;(x_traj(:,i));(y_traj(:,i))];
 end
 figure;
-plot(XX(3:constants.nx:end));title('output')
+plot(XX(3:constants.nx:end));title('x3 = output');hold on;plot(xxol(3:constants.nx:end));legend('MPC in closed-loop','open-loop')
+figure;
+plot(XX(1:constants.nx:end));title('x1');hold on;plot(xxol(1:constants.nx:end));legend('MPC in closed-loop','open-loop')
+figure;
+plot(XX(2:constants.nx:end));title('x2');hold on;plot(xxol(2:constants.nx:end));legend('MPC in closed-loop','open-loop')
 
 
 function yalmip_optimizer = create_multi_rate_homo_mpc(constants)
