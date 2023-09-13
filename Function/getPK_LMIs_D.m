@@ -10,7 +10,7 @@ m = length(R(1,:)); % input dimension
 
 % Weighting matrices for cost function
 Q_eps = sqrtm(Q);%could include +epsilon here for nonlinear systems
-R_eps = sqrt(R);
+R_eps = sqrtm(R);
  
 % X Y and Lambda matrices generation
 Y_0_LMIs = sdpvar(m,n); 
@@ -19,19 +19,19 @@ x_i = sdpvar(n,1);
 % Build Pbarxj
 P_xj={};
 for i = 1:constants.nx
-    P_xj{1,i}=sdpvar(n);%sdpvar(n,n,'diagonal');
+    P_xj{1,i}=diag(sdpvar(n,1));%sdpvar(n,n,'diagonal');
 end
 % Build Qbarxij
 Q_xij={};
 for p = 1:constants.pbar-1
     for i = 1:constants.nx
-        Q_xij{p,i}=sdpvar(n);%,n,'diagonal');
+        Q_xij{p,i}=diag(sdpvar(n,1));%,n,'diagonal');
     end
 end
 %% Multi Convexity constraints
 % Starting to build the contraints
 i = 0;
-% Let's start by implementing (29)
+% Let's start by implementing (25)
 % We check conditions only for the vertices of Theta at pbar of different
 % states
 for num_state = 1:constants.nx
@@ -44,12 +44,13 @@ for num_state = 1:constants.nx
           X = diag(x_i);
           ineq = [x_i(num_state), (A*X+B*Y);
                (A*X+B*Y)', P_xj{1,num_state}];
-          con = [con;ineq>=0];
+          con = [con,
+                ineq>=0];
           % Now 'con' is complete and we can start the optimization problem
            i=i+1;
     end
 end
-% Implementation of (30)
+% Implementation of (26)
 % We check conditions only for the vertices of Theta at different p and different
 % states
 
@@ -64,14 +65,15 @@ for pred = 1:constants.pbar-1
               X = diag(x_i);
               ineq = [1/Q(num_state,num_state), (C*X+D*Y);
                    (C*X+D*Y)', Q_xij{pred,num_state}];
-              con = [con;ineq>=0];
+              con = [con,
+                  ineq>=0];
               % Now 'con' is complete and we can start the optimization problem
                i=i+1;
         end
     end
 end
 
-% implementing (33)
+% implementing (27)
 PbarQ = zeros(n,n);
 for state = 1:constants.nx
     for p = 1:constants.pbar-1
@@ -86,7 +88,8 @@ ineq = [X, PbarQ, (R_eps*Y)', (Q_eps*X)';...
        R_eps*Y, zeros(m,n), eye(m), zeros(m,n);...
       Q_eps*X, zeros(n,n+m), eye(n)];
 
-con = [con;ineq>=0];
+con = [con,
+    ineq>=0];
 
 
 % Display the number of iterations
@@ -101,12 +104,8 @@ options = sdpsettings('solver','sdpt3');
 diagnostics =optimize(con,-log(det(X_0_LMIs)));
 
 if diagnostics.problem ~= 0
-    if diagnostics.problem ==4
-        disp('maximum iteration')
-    else
-        flagerror = diagnostics.problem
-        disp('something wrong in the optimization')
-    end
+    diagnostics.problem
+    disp('something wrong in the optimization')
 end
 
 

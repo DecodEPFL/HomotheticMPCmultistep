@@ -1,58 +1,56 @@
+% Clear workspace, close figures, and clear command window
 clear all
 close all
 clc
-
+% Add path to function folder
+addpath('Function')  
+% Load data from a .mat file
 load("offlineComputation.mat")
 
-
+% Define constants
 constants.n = size(multiStepModel.Abar,2);
 constants.m = size(multiStepModel.Bbar,2);
 constants.p = size(multiStepModel.Cbar,1);
 constants.np = size(constants.theta,1);
-
 constants.A = multiStepModel.Abar;
 constants.B = multiStepModel.Bbar;
 constants.C = multiStepModel.Cbar;
 constants.D = multiStepModel.Dbar;
-
-constants.Xf_homo = constants.X0;
 constants.cU = constants.cU;
 constants.F = constants.F;
 constants.G = constants.G;
 constants.Gbig = constants.Gbig;
 constants.Fbig = constants.Fbig;
 constants.X_0 = constants.X0;
-
 constants.Hx = constants.Hx;
 constants.hx = constants.hx;
-
 constants.P = constants.P;
 constants.K = constants.K;
 constants.Q = constants.Q;
 constants.R = constants.R;
-
 constants.H_theta = constants.Htheta;
 constants.h_theta = constants.htheta;
 
-constants.N = 6;
+constants.N = 5;
 
 % creation of the solver
-MPC = create_multi_rate_mpc(constants);
-
+MPC = create_multi_rate_homo_mpc(constants);
+%%
 % simulation time
-Tsim = 15; 
+Tsim = 10; 
 % running simulation
-x0 = [2;2;2];
+x0 = [1;4;2];
 [x_traj,u_traj, y_traj,lambda,alpha,flag]= simulation(MPC,x0,constants,Tsim);%simulate
-
+%%
 XX = [];
 for i = 1:Tsim
-    XX =[XX;x_traj(:,i);y_traj(:,i)];
+    XX =[XX;(x_traj(:,i));(y_traj(:,i))];
 end
 figure;
-plot(XX(3:constants.nx:end));title('x3')
+plot(XX(3:constants.nx:end));title('output')
 
-function yalmip_optimizer = create_multi_rate_mpc(constants)
+
+function yalmip_optimizer = create_multi_rate_homo_mpc(constants)
 % extract from constants the variable needed
 v_0 = constants.v_0;
 c_0 = constants.c_0;
@@ -83,6 +81,7 @@ gbar = constants.gbar;
 % define symbolic optimization variables
 x_t = sdpvar(constants.n,1,'full');%measured state
 Z = sdpvar(constants.n,constants.N+1,'full');%nominal state z (center of tube)
+X = sdpvar(constants.n,constants.N+1,'full'); %nominal state x
 V = sdpvar(constants.m,constants.N,'full'); 
 Y = sdpvar(constants.p,constants.N,'full'); 
 alpha = sdpvar(1,constants.N+1,'full');
@@ -90,12 +89,8 @@ alpha = sdpvar(1,constants.N+1,'full');
 Indices = zeros(N,v_0,c_0+nF*(pbar-1),q_t);
 %2. add sdpvar entries c_0
 %first c_0 entries; which param: 
-%JKIndices(:,:,1:c_0,1:(constants.pbar*constants.nu+constants.nx)*2)=ones(N,v_0,c_0,(constants.pbar*constants.nu+constants.nx)*2);
 Indices(:,:,1:c_0,1:(constants.pbar*constants.nu+constants.nx)*2*nx)=ones(N,v_0,c_0,(constants.pbar*constants.nu+constants.nx)*2*constants.nx);
-%JKLambda(:,:,c_0+1:end,(constants.pbar*constants.nu+constants.nx)*2+1:end)=0*Lambda(:,:,c_0+1:end,(constants.pbar*constants.nu+constants.nx)*2+1:end);
 %3. add sdpvar entries for each F
-%JKstart_index_Htheta=(constants.pbar*constants.nu+constants.nx)*2;
-
 start_index_Htheta=(constants.pbar*constants.nu+constants.nx)*2*nx;
 for p=constants.pbar-1:-1:1
     %index in H_theta corresponding to predictor p:
@@ -112,12 +107,14 @@ Lambda=Lambda.*Indices;
 
 %initialize cost
 objective = 0;
+X(:,1) = x_t; 
 constraints = [Hx*(x_t - Z(:,1)) - alpha(1)*hx<=0]; % initial state constraint 
 for k = 1:N
-    Y(:,k) = C_bar*Z(:,k)+D_bar*(K*Z(:,k)+V(:,k));
+    X(:,k+1) = A_bar*X(:,k)+B_bar*(K*X(:,k)+V(:,k));
+    Y(:,k) = C_bar*X(:,k)+D_bar*(K*X(:,k)+V(:,k));
     % dynamics
     constraints = [constraints, F*Z(:,k) + alpha(k)*fbar<=ones(size(F,1),1)];
-    constraints = [constraints, (G*K)*Z(:,k) + G*V(:,k) + alpha(k)*gbar<=ones(size(G,1),1)];
+    constraints = [constraints, G*K*Z(:,k) + G*V(:,k) + alpha(k)*gbar<=ones(size(G,1),1)];
     for j=1:constants.v_0 %cycle through vertices of tube
         %compute vertices tube:
          x_kj=Z(:,k) + alpha(k)*constants.X_0.V(j,:)';
@@ -140,16 +137,20 @@ for k = 1:N
             end
     end
     %alpha>0
-    objective = objective + 10*alpha(k);
+    %objective = objective + alpha(k);
     constraints = [constraints,alpha(k)>=0];
-    objective = objective +stagecosts(Y(:,k),V(:,k),constants.Q,constants.R) ; %add stage cost
+    objective = objective +stagecosts(Y(:,k),V(:,k),X(:,k),constants) ; %add stage cost
 end
 
+constraints = [constraints,alpha(k)>=0];
+constraints = [constraints,alpha(N+1)<=constants.alphamax,
+    Z(:,N+1)==zeros(size(Z(:,N+1))),
+    V(:,N)==zeros(constants.pbar,1)];
 objective = objective + terminalcosts(Z(:,N+1),constants.P); %add terminal cost
 objective = objective + sum(alpha(:))*1e-3;
 % setup optimizer object
 ops = sdpsettings('verbose',1,'solver','quadprog');%solver settings
-yalmip_optimizer = optimizer(constraints,objective,ops,x_t,{objective,Z,V,Y,alpha,Lambda});%set solver
+yalmip_optimizer = optimizer(constraints,objective,ops,x_t,{objective,Z,X,V,Y,alpha,Lambda});%set solver
 end
 
 
@@ -164,15 +165,17 @@ function [x_traj, u_traj, y_traj,lambda,alpha,flag] = simulation(yalmip_optimize
         [res,flag] = yalmip_optimizer(x_traj(:,end)); % call mpc
         assert(flag==0||flag==3);%check for errors/infeasibility
         obj_sol_mpc{k} = res{1}; %optimal cost
-        x_sol_mpc{k} = res{2};%get nominal state
-        u_sol_mpc{k} = res{3};%get nominal input
+        z_sol_mpc{k} = res{2};%get nominal state
+        x_sol_mpc{k} = res{3};%get nominal state
+        u_sol_mpc{k} = res{4};%get nominal input
         lambda{k} = res{6};%get lambda
         alpha{k} = res{5};%get alpha
         
         %w_traj(:,end+1) = constants.W.V(1,:)';%simply take one vertex for now
-        u_traj(:,end+1) = u_sol_mpc{k}(:,1)+constants.K*x_traj(:,k);%apply input
-        x_traj(:,end+1) = constants.A * x_traj(:,end) +constants.B * u_traj(:,end);%simulate one step
+        u_traj(:,end+1) = u_sol_mpc{k}(:,1)+constants.K*x_traj(:,end);%apply input
+        %u_traj(:,end+1) = constants.K*x_traj(:,end);%apply input
         y_traj(:,end+1) = constants.C * x_traj(:,end) +constants.D * u_traj(:,end);
+        x_traj(:,end+1) = constants.A * x_traj(:,end) +constants.B * u_traj(:,end);%simulate one step
     end
     x_traj(:,end)=[];%remove last state (to have trajectories of length Tsim)
 end 
@@ -195,8 +198,8 @@ function [out] = getBigE(x,u,constants)
 end
 
 
-function cost = stagecosts(y,u,Q,R)  
-    cost = y'*Q*y + u'*R*u;
+function cost = stagecosts(y,u,x,constants)  
+    cost = y'*constants.Q*y + u'*constants.R*u +x'*constants.Q(1:constants.nx,1:constants.nx)*x;
 end
 
 function cost = terminalcosts(x,P)

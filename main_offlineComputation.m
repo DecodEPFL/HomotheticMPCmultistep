@@ -1,15 +1,33 @@
-bclear all
+% Clear workspace, close figures, and clear command window
+clear all
 close all
 clc
 
+% Add path to function folder
 addpath('Function')  
+
+% Load data from a .mat file
 load IdentifiedModelandData.mat
 
+%% constraints
+% Define input constraints
+umax=10;
+umin = -10;
+constants.umax = umax;
+constants.umin = umin;
+
+% Define state constraints
+xmax = 10;
+xmin = [-10; -10; -10];
+constants.xmax = xmax;
+constants.xmin = xmin;
+
+%% Get necessary parameters and matrices from loaded data
 ppred = Bound.ppred;
 pbar = ppred;
 nx = RealSys.nx;
 
-nw = 1;%RealSys.nw;
+nw =RealSys.nw;
 M = RealSys.M;
 input = data.u;
 state = data.xx;
@@ -18,7 +36,9 @@ constants.nx = nx;
 constants.nu = RealSys.nu;
 constants.pbar = pbar;
 
-% test of the obtained multistep predictors
+Bound.tau = Bound.tau_cons;
+
+%% multistep predictors
 thetaTRUE = RealSys.thetaTRUE';
 AbarTRUE = zeros(nx,nx);
 BbarTRUE = zeros(nx,ppred);
@@ -38,29 +58,28 @@ Nbar = blockDiagonal(M,ppred-1);
 
 Nbar = [Nbar zeros(nx*(ppred-1),1)];
 
-% input and distrubance
 j = 1;
+% definition of exogenous signals
 for i = 0:ppred:length(input)-ppred
     Ubig{j} = input(i+1:i+ppred);
     Wbig{j} = data.w(i+1:i+ppred);
     j = j+1;
 end
 
-% building the true matrices
+% Abar Bbar
 for i = 1:nx
     Abar(i,:) = theta{i,ppred}(1:nx);
-    Bbar(i,:) = theta{i,ppred}(nx+1:end);
+    Bbar(i,:) = flip(theta{i,ppred}(nx+1:end));
     AbarTRUE(i,:) = thetaTRUE{i,ppred}(1:nx);
-    BbarTRUE(i,:) = thetaTRUE{i,ppred}(nx+1:end);
+    BbarTRUE(i,:) = flip(thetaTRUE{i,ppred}(nx+1:end));
 end
-
-% building the big matrices with the identified parameters y = phi^T*theta
+% Dbar Cbar Nbar
 for j = 1:ppred-1
     for i = 1:nx
         Cbar((j-1)*nx+i,:) = theta{i,j}(1:nx);
-        Dbar((j-1)*nx+i,1:length(theta{i,j}(nx+1:end))) = theta{i,j}(nx+1:end);
+        Dbar((j-1)*nx+i,1:length(theta{i,j}(nx+1:end))) = flip(theta{i,j}(nx+1:end));
         CbarTRUE((j-1)*nx+i,:) = thetaTRUE{i,j}(1:nx);
-        DbarTRUE((j-1)*nx+i,1:length(thetaTRUE{i,j}(nx+1:end))) = thetaTRUE{i,j}(nx+1:end);
+        DbarTRUE((j-1)*nx+i,1:length(thetaTRUE{i,j}(nx+1:end))) = flip(thetaTRUE{i,j}(nx+1:end));
     end
     iter = 0;
     for index = j:-1:1
@@ -69,6 +88,7 @@ for j = 1:ppred-1
     end
 end
 
+% definition Mbar
 col = 1;
 for j = ppred-1:-1:1
     MbarTRUE(:,col) = RealSys.A^(j)*RealSys.M;
@@ -81,27 +101,29 @@ Nbig = length(Ubig);
 YY = [];
 YY = [YY; X0big];
 
+% Test identified multistep
 for jp = 1:Nbig
-    X1big = Abar*X0big+Bbar*Ubig{jp}'+Mbar*Wbig{jp}';
-    Ybig = Cbar*X0big + Dbar*Ubig{jp}' + Nbar*Wbig{jp}';
+    X1big = Abar*X0big+Bbar*Ubig{jp}';%MbarTRUE*Wbig{jp}';
+    Ybig = Cbar*X0big + Dbar*Ubig{jp}';% NbarTRUE*Wbig{jp}';
     X0big = X1big;
     YY = [YY; Ybig; X1big];
 end
 
-% Plot of the data
+
 figure;plot(state(:,1));hold on;plot(YY(1:nx:end-nx));  legend('data','estimated');title('x1')
 figure;plot(state(:,2));hold on;plot(YY(2:nx:end-nx));  legend('data','estimated');title('x2')
 figure;plot(state(:,3));hold on;plot(YY(3:nx:end-nx));  legend('data','estimated');title('x3')
 
-% Test of the obtained multi-step model
+
 X0big = state(1,:)';
 YY = [];
 YY = [YY; X0big];
 for jp = 1:Nbig
-    X1big = AbarTRUE*X0big+BbarTRUE*Ubig{jp}'+MbarTRUE*Wbig{jp}';
+    X1big = AbarTRUE*X0big + BbarTRUE*Ubig{jp}' + MbarTRUE*Wbig{jp}';
     Ybig = CbarTRUE*X0big + DbarTRUE*Ubig{jp}' + NbarTRUE*Wbig{jp}';
     X0big = X1big;
-    YY = [YY; Ybig; X1big];
+    YY = [YY; Ybig];
+    YY = [YY; X1big];
 end
 
 figure;plot(state(:,1));hold on;plot(YY(1:nx:end-nx));title('trueparam multistep');legend('data','estimated')
@@ -138,117 +160,72 @@ multiStepModel.theta = theta;
 thetaTRUEP = [];
 thetaP = [];
 
-%theta =[x1pbar, x2pbar, x3pbar, ...,...x11,x21,x31]
-
-num_row = 0; num_rowP = 0;
-num_col = 0; num_colP = 0;
-for j = 1:ppred
-    for i = 1:nx
-        if FPS{i,j}.isEmptySet
-            min(FPS{i,j}.A*thetaTRUE{i,j}'<=FPS{i,j}.b)
-            FPS{i,j}
-            FPS{i,j}.isEmptySet
-        end
-        % outer approximation of the FPS
-        Ftemp = outerApproxBox(FPS{i,j}.A,FPS{i,j}.b);
-        
-        FPS{i,j}= Ftemp;
-        num_row = num_row + size(FPS{i,j}.A,1);
-        num_col = num_col + size(FPS{i,j}.A,2);
-        if j == ppred
-            num_rowP = num_rowP + size(FPS{i,j}.A,1);
-            num_colP = num_colP + size(FPS{i,j}.A,2);
-        end
-    end
-end
-
-% building overall FPS and stacking parameters
-FPSA = zeros(num_row,num_col);
-FPSAP = zeros(num_rowP,num_colP);
-FPSb = []; FPSbP = [];
-thetaPbar = [];
+FPSA =[];
+FPSb =[];
 for j = 1:constants.pbar
     for i = constants.nx:-1:1
-        if FPS{i,j}.A*RealSys.thetaTRUE{j,i}'>FPS{i,j}.b
-            stop =1;
+        if FPS{i,j}.isEmptySet
+            min(FPS{i,j}.A*thetaTRUE{i,j}'<=FPS{i,j}.b)
+            error('FPS empty')
         end
-        if FPS{i,j}.A*theta{i,j}'>FPS{i,j}.b
-            stop =1;
+        if max(FPS{i,j}.A*RealSys.thetaTRUE{j,i}'-FPS{i,j}.b)>1e-7
+            error('FPS does not contain true param')
         end
+        FPS{i,j} = outerApproxBox(FPS{i,j}.A,FPS{i,j}.b);
         thetaTRUEP = [RealSys.thetaTRUE{j,i}';thetaTRUEP];
         thetaP = [theta{i,j}';thetaP];
         matrA = FPS{i,j}.A;
-        colA = size(matrA,2); rowA = size(matrA,1);
-        num_row = num_row-rowA; num_col = num_col-colA;
-        FPSA(num_row+1:num_row+rowA,num_col+1:num_col+colA)=matrA;
+        FPSA = blkdiag(matrA,FPSA);
         FPSb=[FPS{i,j}.b;FPSb];
-        if j ==pbar
-            thetaPbar = [theta{i,j}';thetaPbar];
-            matrA = FPS{i,j}.A;
-            colA = size(matrA,2); rowA = size(matrA,1);
-            num_rowP = num_rowP-rowA; num_colP = num_colP-colA;
-            FPSAP(num_rowP+1:num_rowP+rowA,num_colP+1:num_colP+colA)=matrA;
-            FPSbP=[FPS{i,j}.b;FPSbP];
+        if max(FPSA*thetaP-FPSb)>1e-7
+            error('parameters not in FPS')
         end
     end
 end
 
-if max(FPSA*thetaP-FPSb)<1e-8
+if max(FPSA*thetaP-FPSb)>1e-8
     disp('theta p not belongs to FPS')
 end
-if max(FPSA*thetaTRUEP-FPSb)<1e-8
-    disp('theta p TRUE not belongs to FPS')
-end
-
 FPS_big = Polyhedron('A',FPSA,'b',FPSb); 
-FPSP = Polyhedron('A',FPSAP,'b',FPSbP); 
-
-constants.thetapbar = thetaPbar;
+if FPS_big.isEmptySet
+    error('FPS is empty')
+end
 constants.theta = thetaP;
 constants.thetaTRUE = thetaTRUEP;
 constants.np = size(thetaP,1);
 
 nx = constants.nx;
 
-%% build Ai Bi Ci Di matrices
-[A_i,B_i,C_i,D_i,A_ip,B_ip] = buildAiBiCiDi(constants,multiStepModel,thetaP,thetaPbar,theta);
+%build AiBiCiDi
+[A_i,B_i,C_i,D_i] = buildAiBiCiDi(constants,multiStepModel,thetaP,theta);
 constants.A_i=A_i;
 constants.B_i=B_i;
 constants.C_i=C_i;
 constants.D_i=D_i;
-constants.A_ip=A_ip;
-constants.B_ip=B_ip;
 nu_ms = constants.nu*constants.pbar;
 constants.nu_ms = nu_ms;
 
-% DEFINITION OF THE SETS
+%% DEFINITION OF THE SETS
 %constraints on input
-umax=constants.umax;
+umax = constants.umax;
 umin = constants.umin;
 
-Au=[eye(pbar)./umax;
-    -eye(pbar)./(-umin)];
-bu=[ones(pbar,1);
-    ones(pbar,1)];
+constants.G=[eye(constants.pbar)./umax;
+            -eye(constants.pbar)./(-umin)];
+bu=[ones(constants.pbar,1);
+    ones(constants.pbar,1)];
 
-cU=Polyhedron('A',Au,'b',bu);
-constants.cU = cU;
-
-constants.G = Au;
+constants.cU = Polyhedron(constants.G,bu);
 
 
 % constraints on state
 xmax = constants.xmax;
 xmin = constants.xmin;
-Ax=[eye(nx); 
-    -eye(nx)];
-bx=[ones(nx,1)*xmax;
-    ones(nx,1)*(-xmin)];
-cX=Polyhedron('A',Ax,'b',bx);
-
-
-constants.F = Ax./bx;
-
+constants.F=[eye(nx)./xmax; 
+    -eye(nx)./(-xmin)];
+bx=[ones(nx,1);
+    ones(nx,1)];
+cX=Polyhedron(constants.F,bx);
 
 
 % FPS
@@ -274,7 +251,15 @@ constants.R = R;
 
 constants.P = P;
 constants.K = K;
-%% Design of low complexity X0
+%%
+Hw = [eye(pbar);-eye(pbar)];
+hw = [data.wmax*ones(2*pbar,1)];
+W = Polyhedron(Hw,hw);
+Wx = MbarTRUE*W; %or use estimate lambda
+constants.Wx = Wx;
+Wy = NbarTRUE*W;%or use estimate lambda
+constants.Wy = Wy;
+
 A_cl = Abar+Bbar*K;
 [V,lambda]=eig(A_cl);
 
@@ -289,14 +274,15 @@ elseif min(imag(V(:,1))==0)
 elseif min(imag(V(:,3))==0)
     V=([V(:,3),real(V(:,2)),imag(V(:,2))]);
 end
-X0=Polyhedron([inv(V);-inv(V)],ones(2*nx,1));
 
+X0 = Polyhedron([inv(V);-inv(V)],ones(2*nx,1));
 
-constants.Hx = X0.A;
-constants.hx = X0.b;
+constants.Hx = [inv(V);-inv(V)];
+constants.hx = ones(2*nx,1);
 constants.X0 = X0;
-constants.c_0 = length(X0.b(:,1));
-constants.v_0 = length(X0.V(:,1));
+
+constants.c_0 = length(constants.X0.b(:,1));
+constants.v_0 = length(constants.X0.V(:,1));
 constants.q_t = length(FPS_big.b(:,1));  
 
 
@@ -324,11 +310,6 @@ end
 constants.fbar = fbar;
 constants.gbar = gbar;
 
-Hw = [eye(pbar);-eye(pbar)];
-hw = [data.wmax*ones(2*pbar,1)];
-W = Polyhedron(Hw,hw);
-Wx = MbarTRUE*W;
-constants.Wx = Wx;
 
 % Computation of $\bar{w}x$
 wbarx = [];
@@ -341,13 +322,10 @@ for i=1: length(constants.Hx(:,1))
 end
 
 constants.wbarx = wbarx;
-Wy = NbarTRUE*W;
-constants.Wy = Wy;
 
-% definition of Fbig
 Fbig = blockDiagonalMatrix(constants.F, pbar-1);
 constants.Fbig = Fbig;
-% definition of Gbig
+
 Gbig = blockDiagonalMatrix(constants.G, pbar-1);
 constants.Gbig = Gbig;
 
@@ -362,13 +340,14 @@ for i=1: length(constants.Fbig(:,1))
 end
 
 constants.wbary = wbary;
-constants.alphamax = 0.034611662920428;
+constants.alphamax = 3.34;
 
 
-save('offlineComputation4','RealSys','constants','data','multiStepModel','Bound')
+save('offlineComputation','RealSys','constants','data','multiStepModel','Bound')
 
 
-% Function to outer-approximate a polytopic set with a box
+
+
 function box = outerApproxBox(A,b)
     p = size(A,2);
     options=optimset('Display','none','tolcon',1e-8);
@@ -383,6 +362,7 @@ function box = outerApproxBox(A,b)
     boxT = polytope(A,b);
     box = Polyhedron('A',A,'b',b,'V',extreme(boxT));
     if box.isEmptySet
+        %box = Polyhedron('Ae',eye(p),'be',[lower]);
         box = Polyhedron('A',[eye(p);-eye(p)],'b',[upper';-lower']);
     else
 
