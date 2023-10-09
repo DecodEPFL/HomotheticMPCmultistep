@@ -10,9 +10,9 @@ This GitHub repository contains the accompanying code for the paper titled **"Ho
 
 ## Dependences:
 
-1. **Yalmip
+1. Yalmip
 
-2. **The Multi-Parametric Toolbox (MPT3)
+2. The Multi-Parametric Toolbox (MPT3)
 
 ## Getting Started:
 
