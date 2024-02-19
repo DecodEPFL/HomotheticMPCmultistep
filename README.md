@@ -38,3 +38,9 @@ git clone https://github.com/DecodEPFL/HomotheticMPCmultistep.git
 - The code provided here is a companion to the paper and should be used in conjunction with the paper's instructions and explanations for a comprehensive understanding of the algorithm and methodology.
 
 - Feel free to reach out Danilo Saccani (danilo.saccani@epfl.ch) or Johannes Köhler (jkoehle@ethz.ch) if you have any questions.
+
+## Citation
+
+If you use this code in your research, please cite the accompanying paper: 
+
+Saccani, D., Ferrari-Trecate, G., Zeilinger, M. N. and Köhler, J. (2023). Homothetic tube model predictive control with multi-step predictors. IEEE Control Systems Letters.
